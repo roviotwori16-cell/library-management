@@ -1,0 +1,272 @@
+```cpp
+// LibraryManagement.cpp
+// Compile: g++ -std=c++17 -O2 LibraryManagement.cpp -o library
+// Run: ./library
+
+#include <iostream>
+#include <string>
+#include <vector>
+#include <unordered_map>
+#include <algorithm>
+
+using std::string;
+using std::vector;
+using std::cout;
+using std::endl;
+
+// Simple Book class
+class Book {
+public:
+    int id;
+    string title;
+    string author;
+    string isbn;
+    int total_copies;
+    int available_copies;
+
+    Book() = default;
+    Book(int id, string title, string author, string isbn, int copies)
+        : id(id), title(std::move(title)), author(std::move(author)), isbn(std::move(isbn)),
+          total_copies(copies), available_copies(copies) {}
+
+    bool isAvailable() const { return available_copies > 0; }
+};
+
+// Simple User class
+class User {
+public:
+    int id;
+    string name;
+    vector<int> borrowed_book_ids; // store book IDs
+
+    User() = default;
+    User(int id, string name) : id(id), name(std::move(name)) {}
+
+    bool hasBorrowed(int bookId) const {
+        return std::find(borrowed_book_ids.begin(), borrowed_book_ids.end(), bookId) != borrowed_book_ids.end();
+    }
+};
+
+// Library class that manages books and users
+class Library {
+private:
+    std::unordered_map<int, Book> books;        // key: book id
+    std::unordered_map<string, int> isbnIndex; // isbn -> book id
+    std::unordered_map<int, User> users;       // key: user id
+    int nextBookId = 1;
+    int nextUserId = 1;
+
+public:
+    // Add a new book. Returns the assigned book id.
+    int addBook(const string& title, const string& author, const string& isbn, int copies) {
+        if (copies <= 0) copies = 1;
+        // If ISBN already exists, increase copies instead of creating duplicate entry
+        auto it = isbnIndex.find(isbn);
+        if (it != isbnIndex.end()) {
+            int existingId = it->second;
+            books[existingId].total_copies += copies;
+            books[existingId].available_copies += copies;
+            return existingId;
+        }
+
+        int id = nextBookId++;
+        Book b(id, title, author, isbn, copies);
+        books.emplace(id, std::move(b));
+        isbnIndex[isbn] = id;
+        return id;
+    }
+
+    // Remove a book entirely. Return true if removed.
+    bool removeBook(int bookId) {
+        auto it = books.find(bookId);
+        if (it == books.end()) return false;
+        // Only allow removal if no copies are borrowed (i.e., available == total)
+        if (it->second.available_copies != it->second.total_copies) return false;
+        isbnIndex.erase(it->second.isbn);
+        books.erase(it);
+        return true;
+    }
+
+    // Search functions
+    vector<Book> searchByTitle(const string& titlePart) const {
+        vector<Book> result;
+        for (const auto& kv : books) {
+            const Book& b = kv.second;
+            if (b.title.find(titlePart) != string::npos) result.push_back(b);
+        }
+        return result;
+    }
+
+    vector<Book> searchByAuthor(const string& authorPart) const {
+        vector<Book> result;
+        for (const auto& kv : books) {
+            const Book& b = kv.second;
+            if (b.author.find(authorPart) != string::npos) result.push_back(b);
+        }
+        return result;
+    }
+
+    // Find by ISBN
+    const Book* findByISBN(const string& isbn) const {
+        auto it = isbnIndex.find(isbn);
+        if (it == isbnIndex.end()) return nullptr;
+        int id = it->second;
+        auto bookIt = books.find(id);
+        if (bookIt == books.end()) return nullptr;
+        return &bookIt->second;
+    }
+
+    // Register user, returns user id
+    int registerUser(const string& name) {
+        int id = nextUserId++;
+        users.emplace(id, User(id, name));
+        return id;
+    }
+
+    // Borrow a book: check user and book existence and availability
+    bool borrowBook(int userId, int bookId) {
+        auto uit = users.find(userId);
+        if (uit == users.end()) return false;
+        auto bit = books.find(bookId);
+        if (bit == books.end()) return false;
+        Book& b = bit->second;
+        User& u = uit->second;
+
+        if (!b.isAvailable()) return false;
+        if (u.hasBorrowed(bookId)) return false; // don't allow duplicate borrows of same book
+
+        b.available_copies -= 1;
+        u.borrowed_book_ids.push_back(bookId);
+        return true;
+    }
+
+    // Return book
+    bool returnBook(int userId, int bookId) {
+        auto uit = users.find(userId);
+        if (uit == users.end()) return false;
+        auto bit = books.find(bookId);
+        if (bit == books.end()) return false;
+        Book& b = bit->second;
+        User& u = uit->second;
+
+        auto pos = std::find(u.borrowed_book_ids.begin(), u.borrowed_book_ids.end(), bookId);
+        if (pos == u.borrowed_book_ids.end()) return false; // user didn't borrow this book
+
+        u.borrowed_book_ids.erase(pos);
+        b.available_copies += 1;
+        return true;
+    }
+
+    // Helper getters for tests / output
+    const Book* getBookById(int id) const {
+        auto it = books.find(id);
+        if (it == books.end()) return nullptr;
+        return &it->second;
+    }
+
+    const User* getUserById(int id) const {
+        auto it = users.find(id);
+        if (it == users.end()) return nullptr;
+        return &it->second;
+    }
+
+    // Print summary (useful for debugging)
+    void printSummary() const {
+        cout << "Library Summary:\n";
+        cout << "Books (" << books.size() << "):\n";
+        for (const auto& kv : books) {
+            const Book& b = kv.second;
+            cout << "  ID " << b.id << ": \"" << b.title << "\" by " << b.author
+                 << " ISBN:" << b.isbn << " [" << b.available_copies << "/" << b.total_copies << " available]\n";
+        }
+        cout << "Users (" << users.size() << "):\n";
+        for (const auto& kv : users) {
+            const User& u = kv.second;
+            cout << "  ID " << u.id << ": " << u.name << " (borrowed " << u.borrowed_book_ids.size() << ")\n";
+        }
+    }
+};
+
+// Small testing utility
+void runTests() {
+    cout << "Running tests...\n";
+    Library lib;
+
+    // Test: register users
+    int aliceId = lib.registerUser("Alice");
+    int bobId = lib.registerUser("Bob");
+    if (aliceId <= 0 || bobId <= 0) cout << "FAIL: User registration\n"; else cout << "PASS: User registration\n";
+
+    // Test: add books
+    int id1 = lib.addBook("C++ Primer", "Lippman", "ISBN-001", 2);
+    int id2 = lib.addBook("Effective Modern C++", "Scott Meyers", "ISBN-002", 1);
+    int id3 = lib.addBook("The Pragmatic Programmer", "Hunt & Thomas", "ISBN-003", 3);
+
+    if (!lib.getBookById(id1) || !lib.getBookById(id2) || !lib.getBookById(id3))
+        cout << "FAIL: Adding books\n";
+    else
+        cout << "PASS: Adding books\n";
+
+    // Test: search by title partial
+    auto res = lib.searchByTitle("C++");
+    if (res.empty()) cout << "FAIL: Search by title\n"; else cout << "PASS: Search by title\n";
+
+    // Test: borrow book success
+    bool borrow1 = lib.borrowBook(aliceId, id1); // Alice borrows one copy of C++ Primer
+    if (!borrow1) cout << "FAIL: borrow book (should succeed)\n"; else cout << "PASS: borrow book (succeed)\n";
+
+    // Test: borrow same book by same user twice (should fail)
+    bool borrowSameAgain = lib.borrowBook(aliceId, id1);
+    if (borrowSameAgain) cout << "FAIL: user should not borrow same book twice\n"; else cout << "PASS: duplicate borrow prevented\n";
+
+    // Test: borrow copies limit
+    bool borrow2 = lib.borrowBook(bobId, id1); // Bob borrows second copy -> should succeed
+    bool borrow3 = lib.borrowBook(bobId, id1); // no more copies -> should fail
+    if (borrow2 && !borrow3) cout << "PASS: borrow copies limit\n"; else cout << "FAIL: borrow copies limit\n";
+
+    // Test: return book
+    bool ret1 = lib.returnBook(aliceId, id1);
+    if (ret1) cout << "PASS: return book\n"; else cout << "FAIL: return book\n";
+
+    // Test: return a book not borrowed
+    bool retInvalid = lib.returnBook(aliceId, id2); // Alice did not borrow id2
+    if (!retInvalid) cout << "PASS: returning non-borrowed book prevented\n"; else cout << "FAIL: returned non-borrowed book\n";
+
+    // Test: remove book that's currently borrowed (should fail)
+    // First, Bob still has id1 borrowed
+    bool removeWhileBorrowed = lib.removeBook(id1);
+    if (!removeWhileBorrowed) cout << "PASS: cannot remove borrowed book\n"; else cout << "FAIL: should not remove borrowed book\n";
+
+    // Return Bob's copy then remove
+    lib.returnBook(bobId, id1);
+    bool removeNow = lib.removeBook(id1);
+    if (removeNow) cout << "PASS: removed book after all returned\n"; else cout << "FAIL: remove book after return\n";
+
+    // Test: addBook with existing ISBN increases counts
+    const Book* before = lib.getBookById(id3);
+    int addedId = lib.addBook("The Pragmatic Programmer", "Hunt & Thomas", "ISBN-003", 2);
+    const Book* after = lib.getBookById(addedId);
+    if (before && after && after->total_copies == before->total_copies + 2)
+        cout << "PASS: adding copies to existing ISBN\n";
+    else
+        cout << "FAIL: adding copies to existing ISBN\n";
+
+    cout << "\nFinal library state:\n";
+    lib.printSummary();
+
+    cout << "Tests completed.\n";
+}
+
+int main() {
+    // Run automated tests / demo
+    runTests();
+
+    // Optionally: provide a small interactive shell (commented out for clarity)
+    /*
+    Library lib;
+    // Add some demo data or implement a CLI loop to allow user interactions.
+    */
+
+    return 0;
+}
+```
